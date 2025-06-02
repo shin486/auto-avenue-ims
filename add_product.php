@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     if (empty($errors)) {
         $stmt = $conn->prepare("INSERT INTO products 
-                              (name, quantity, price, category, supplier, min_stock_level, 
+                              (name, quantity, price, supplier, category, min_stock_level, 
                               warranty_period, warranty_terms, vin_code) 
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
         

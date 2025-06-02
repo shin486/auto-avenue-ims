@@ -60,10 +60,18 @@ try {
         exit();
     }
 
-    // Fetch all active products
-    $sql = "SELECT * FROM products WHERE is_active = TRUE ORDER BY name ASC";
+    // Handle search query
+    $search = "";
+    if (isset($_GET['search']) && trim($_GET['search']) !== '') {
+        $search = $conn->real_escape_string(trim($_GET['search']));
+        $sql = "SELECT * FROM products WHERE is_active = TRUE AND (name LIKE '%$search%' OR category LIKE '%$search%') ORDER BY name ASC";
+    } else {
+        // Fetch all active products
+        $sql = "SELECT * FROM products WHERE is_active = TRUE ORDER BY name ASC";
+    }
+
     $result = $conn->query($sql);
-    
+
     if (!$result) {
         throw new Exception("Error fetching products: " . $conn->error);
     }
@@ -431,6 +439,20 @@ try {
         <?= htmlspecialchars($error_message) ?>
       </div>
     <?php endif; ?>
+
+    <form method="GET" action="products.php" style="margin-bottom: 20px;">
+  <input type="text" name="search" placeholder="Search products by name or category" 
+         value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>" 
+         style="padding: 8px; width: 250px; border-radius: 4px; border: 1px solid #ccc;">
+  <button type="submit" class="add-product-btn" style="padding: 8px 12px; margin-left: 5px;">Search</button>
+  <?php if (!empty($_GET['search'])): ?>
+    <button type="button" onclick="window.location='products.php'" 
+            style="padding: 8px 12px; margin-left: 5px; background-color: var(--danger);">
+      Clear
+    </button>
+  <?php endif; ?>
+</form>
+
     
     <?php if ($result && $result->num_rows > 0): ?>
       <table>
@@ -439,6 +461,7 @@ try {
             <th>ID</th>
             <th>Product Name</th>
             <th>Category</th>
+            <th>Supplier</th>
             <th>Price (₱)</th>
             <th>Stock</th>
             <th>Actions</th>
@@ -449,6 +472,7 @@ try {
             <tr>
               <td><?= $row['product_id'] ?></td>
               <td><?= htmlspecialchars($row['name']) ?></td>
+              <td><?= htmlspecialchars($row['supplier']) ?></td>
               <td><?= htmlspecialchars($row['category']) ?></td>
               <td><?= number_format($row['price'], 2) ?></td>
               <td class="<?= $row['quantity'] <= $row['min_stock_level'] ? 'low-stock' : '' ?>">

@@ -7,18 +7,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-      --primary:rgb(11, 129, 38);
-      --primary-light:rgb(29, 136, 63);
-      --secondary: #ff6b6b;
-      --success: #4CAF50;
-      --warning: #ff9800;
-      --danger: #f44336;
-      --text-color: #333;
-      --text-light: #666;
-      --bg-color: #f4f6f8;
-      --border-color: #e0e0e0;
-    }
-
+            --primary: #004aad;
+            --primary-light: #2e86de;
+            --primary-dark: #00337a;
+            --danger: #f44336;
+            --success: #4CAF50;
+            --bg-color: #f4f6f8;
+            --text-color: #333;
+            --light-gray: #f5f5f5;
+        }
         
         * {
             box-sizing: border-box;
@@ -212,7 +209,7 @@
 </head>
 <body>
     <div class="logo-section">
-        <img src="autoavelogo.svg" alt="Auto Avenue Logo" class="logo">
+        <img src="images/logo2.png" alt="Auto Avenue Logo" class="logo">
         <h1>Auto Avenue IMS</h1>
     </div>
     
@@ -267,8 +264,8 @@
                 const y = e.clientY - e.target.getBoundingClientRect().top;
                 
                 const ripple = document.createElement('span');
-                ripple.style.left = ${x}px;
-                ripple.style.top = ${y}px;
+                ripple.style.left = `${x}px`;
+                ripple.style.top = `${y}px`;
                 ripple.classList.add('ripple');
                 
                 this.appendChild(ripple);

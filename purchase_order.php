@@ -289,6 +289,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $_POST['action'] === 'submit') {
   <i class="fas fa-arrow-left"></i> Go Back to Dashboard
 </button>
 
+<button type="button" class="submit-btn" onclick="window.location.href='purchase_order_summary.php'">
+  <i class="fas fa-arrow-right"></i> View Order
+</button>
+
     </form>
   </div>
 
