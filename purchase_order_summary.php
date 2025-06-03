@@ -64,16 +64,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_order_id'])) {
 }
 
 // Fetch orders
-if ($_SESSION['role'] === 'manager') {
+// Fetch orders
+if ($_SESSION['role'] === 'manager' || $_SESSION['role'] === 'staff') {
     $order_sql = "SELECT o.*, u.username FROM purchase_orders o JOIN users u ON o.user_id = u.user_id ORDER BY o.order_date DESC";
     $order_stmt = $conn->prepare($order_sql);
 } else {
+    // Other roles if any
     $order_sql = "SELECT * FROM purchase_orders WHERE user_id = ? ORDER BY order_date DESC";
     $order_stmt = $conn->prepare($order_sql);
     $order_stmt->bind_param("i", $_SESSION['user_id']);
 }
 $order_stmt->execute();
 $order_result = $order_stmt->get_result();
+
 
 $orders = [];
 while ($order = $order_result->fetch_assoc()) {

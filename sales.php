@@ -134,8 +134,8 @@ if ($where_clause) {
     <title>Auto Avenue - Sales</title>
     <style>
         :root {
-            --primary: rgb(11, 129, 38);
-            --primary-light: rgb(29, 136, 63);
+            --primary: rgb(0, 0, 0);
+            --primary-light: rgb(66, 169, 111);
             --secondary: #ff6b6b;
             --success: #4CAF50;
             --warning: #ff9800;
