@@ -389,22 +389,21 @@ try {
                 <div class="form-row">
                     <div class="form-group">
                         <label for="report_type">Report Type</label>
-                        <select id="report_type" name="report_type" class="form-select">
+                        <select id="report_type" name="report_type" class="form-select" onchange="updateReportType()">
                             <option value="sales_summary" <?= $report_type == 'sales_summary' ? 'selected' : '' ?>>Sales Summary</option>
                             <option value="inventory_status" <?= $report_type == 'inventory_status' ? 'selected' : '' ?>>Inventory Status</option>
                             <option value="alerts_log" <?= $report_type == 'alerts_log' ? 'selected' : '' ?>>Alerts Log</option>
                         </select>
                     </div>
                     
-                    
                     <div class="form-group">
                         <label for="start_date">Start Date</label>
-                        <input type="date" id="start_date" name="start_date" value="<?= htmlspecialchars($start_date) ?>" class="form-input">
+                        <input type="date" id="start_date" name="start_date" value="<?= htmlspecialchars($start_date) ?>" class="form-input" onchange="updateDateRange()">
                     </div>
                     
                     <div class="form-group">
                         <label for="end_date">End Date</label>
-                        <input type="date" id="end_date" name="end_date" value="<?= htmlspecialchars($end_date) ?>" class="form-input">
+                        <input type="date" id="end_date" name="end_date" value="<?= htmlspecialchars($end_date) ?>" class="form-input" onchange="updateDateRange()">
                     </div>
                 </div>
                 
@@ -420,15 +419,60 @@ try {
                         'inventory_status' => 'Inventory Status Report',
                         'alerts_log' => 'Alerts Log Report',
                         default => 'Report Results'
-                        
                     } ?> 
 
-                    <small>(<?= date('M j, Y', strtotime($start_date)) ?> to <?= date('M j, Y', strtotime($end_date))  ?> )<button type="submit" class="btn-print">Print Report</button> </small> 
-                    
+                    <small>(<?= date('M j, Y', strtotime($start_date)) ?> to <?= date('M j, Y', strtotime($end_date)) ?>)
+                    <button type="button" id="print-report-btn" class="btn-print">Print Report</button></small>
                 </h2>
-
-                 
             </div>
+
+            <script>
+            // Wait for the document to be fully loaded
+            document.addEventListener('DOMContentLoaded', function() {
+                // Get references to form elements
+                const reportTypeSelect = document.getElementById('report_type');
+                const startDateInput = document.getElementById('start_date');
+                const endDateInput = document.getElementById('end_date');
+                const printButton = document.getElementById('print-report-btn');
+                
+                // Add click event listener to the print button
+                if (printButton) {
+                    printButton.addEventListener('click', function() {
+                        // Get current values
+                        const reportType = reportTypeSelect ? reportTypeSelect.value : '<?= $report_type ?>';
+                        const startDate = startDateInput ? encodeURIComponent(startDateInput.value) : '<?= urlencode($start_date) ?>';
+                        const endDate = endDateInput ? encodeURIComponent(endDateInput.value) : '<?= urlencode($end_date) ?>';
+                        
+                        // Construct URL based on report type
+                        let url = 'tcpdf6/examples/';
+                        
+                        switch(reportType) {
+                            case 'sales_summary':
+                                url += 'aaarepsales_summary.php';
+                                break;
+                            case 'inventory_status':
+                                url += 'aaarepinventory_status.php';
+                                break;
+                            case 'alerts_log':
+                                // Fix the filename to match exactly what we created
+                                url += 'aaarepalert_log.php';
+                                break;
+                            default:
+                                url += 'aaarepsales_summary.php';
+                        }
+                        
+                        // Add date parameters
+                        url += '?start_date=' + startDate + '&end_date=' + endDate;
+                        
+                        // Debug output
+                        console.log('Opening URL:', url);
+                        
+                        // Navigate to the report in a new tab
+                        window.open(url, '_blank');
+                    });
+                }
+            });
+            </script>
 
             <?php if (isset($error_message)): ?>
                 <div class="error-message">

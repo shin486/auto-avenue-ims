@@ -289,56 +289,81 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
       <div class="supplier-section">
         <h2><i class="fas fa-truck"></i> Supplier Details</h2>
         <div class="form-row">
-          <select name="supplier_name" id="supplier-select" required onchange="window.location.href='purchase_order.php?supplier_name='+encodeURIComponent(this.value)">
-            <option value="">-- Select Supplier --</option>
-            <?php while ($row = $suppliers->fetch_assoc()): ?>
-              <option value="<?= htmlspecialchars($row['category']) ?>"
-                <?= ($supplier_name === $row['category']) ? 'selected' : '' ?>>
-                <?= htmlspecialchars($row['category']) ?>
-              </option>
-            <?php endwhile; ?>
-          </select>
+          <div>
+            <label for="supplier-select"><strong>Supplier:</strong></label>
+            <select name="supplier_name" id="supplier-select" required onchange="window.location.href='purchase_order.php?supplier_name='+encodeURIComponent(this.value)">
+              <option value="">-- Select Supplier --</option>
+              <?php while ($row = $suppliers->fetch_assoc()): ?>
+                <option value="<?= htmlspecialchars($row['category']) ?>"
+                  <?= ($supplier_name === $row['category']) ? 'selected' : '' ?>>
+                  <?= htmlspecialchars($row['category']) ?>
+                </option>
+              <?php endwhile; ?>
+            </select>
+          </div>
 
-          <select name="payment_method" id="payment_method" required onchange="togglePaymentTerms()">
-  <option value="">-- Select Payment Method --</option>
-  <option value="Cash on Delivery">Cash on Delivery</option>
-  <option value="Installment">Installment</option>
-</select>
+          <div>
+            <label for="payment_method"><strong>Payment Method:</strong></label>
+            <select name="payment_method" id="payment_method" required onchange="togglePaymentTerms()">
+              <option value="">-- Select Payment Method --</option>
+              <option value="Cash on Delivery">Cash on Delivery</option>
+              <option value="Installment">Installment</option>
+            </select>
+          </div>
 
-<input type="text" name="payment_terms" id="payment_terms" placeholder="Payment Terms (e.g., 3 months)" style="display: none;" />
+          <div id="payment_terms_container" style="display: none;">
+            <label for="payment_terms"><strong>Payment Terms:</strong></label>
+            <input type="text" name="payment_terms" id="payment_terms" placeholder="e.g., 3 months" />
+          </div>
 
-          <input type="date" name="expected_arrival" required />
+          <div>
+            <label for="expected_arrival"><strong>Expected Arrival:</strong></label>
+            <input type="date" name="expected_arrival" id="expected_arrival" required />
+          </div>
         </div>
       </div>
 
       <!-- Products Table -->
       <?php if (!empty($products)): ?>
-        <h2><i class="fas fa-boxes"></i> Products from Selected Supplier</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Product Name</th>
-              <th>Supplier Name</th>
-              <th>Min Stock</th>
-              <th>Qty in Stock</th>
-              <th>Order Qty</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($products as $product): ?>
+        <div class="form-section">
+          <h2><i class="fas fa-boxes"></i> Products from <?= htmlspecialchars($supplier_name) ?></h2>
+          <p class="instruction-text">Enter quantities for the products you wish to order. Minimum stock levels are shown for reference.</p>
+          
+          <table>
+            <thead>
               <tr>
-                <td><?= htmlspecialchars($product['name']) ?></td>
-                <td><?= htmlspecialchars($product['category']) ?></td>
-                <td><?= htmlspecialchars($product['quantity']) ?></td>
-                <td><?= htmlspecialchars($product['min_stock_level']) ?></td>
-                <td>
-                  <input type="number" min="0" name="products[<?= (int)$product['product_id'] ?>][quantity]" value="0" />
-                  <input type="hidden" name="products[<?= (int)$product['product_id'] ?>][product_id]" value="<?= (int)$product['product_id'] ?>" />
-                </td>
+                <th>Product ID</th>
+                <th>Product Name</th>
+                <th>Supplier</th>
+                <th>Current Stock</th>
+                <th>Min Stock Level</th>
+                <th>Order Quantity</th>
               </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <?php foreach ($products as $product): ?>
+                <tr class="<?= ((int)$product['quantity'] <= (int)$product['min_stock_level']) ? 'low-stock' : '' ?>">
+                  <td><?= htmlspecialchars($product['product_id']) ?></td>
+                  <td><?= htmlspecialchars($product['name']) ?></td>
+                  <td><?= htmlspecialchars($product['category']) ?></td>
+                  <td>
+                    <?= htmlspecialchars($product['quantity']) ?>
+                    <?php if ((int)$product['quantity'] <= (int)$product['min_stock_level']): ?>
+                      <span class="stock-warning" title="Stock below minimum level">
+                        <i class="fas fa-exclamation-triangle"></i>
+                      </span>
+                    <?php endif; ?>
+                  </td>
+                  <td><?= htmlspecialchars($product['min_stock_level']) ?></td>
+                  <td>
+                    <input type="number" min="0" name="products[<?= (int)$product['product_id'] ?>][quantity]" value="<?= ((int)$product['quantity'] <= (int)$product['min_stock_level']) ? max(1, (int)$product['min_stock_level'] - (int)$product['quantity']) : 0 ?>" />
+                    <input type="hidden" name="products[<?= (int)$product['product_id'] ?>][product_id]" value="<?= (int)$product['product_id'] ?>" />
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php else: ?>
         <p class="no-items">Select a supplier to show their products here.</p>
       <?php endif; ?>
@@ -348,25 +373,78 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
         <textarea name="notes" rows="3" placeholder="Additional notes or instructions"></textarea>
       </div>
 
-      <button type="submit" class="submit-btn">
-        <i class="fas fa-paper-plane"></i> Submit Purchase Order
-      </button>
+      <div class="form-actions">
+        <button type="submit" class="submit-btn">
+          <i class="fas fa-paper-plane"></i> Submit Purchase Order
+        </button>
 
-      <button type="button" onclick="window.location.href='dashboard.php'" class="submit-btn">
-  <i class="fas fa-arrow-left"></i> Back to Dashboard
-</button>
+        <button type="button" onclick="window.location.href='dashboard.php'" class="submit-btn secondary-btn">
+          <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </button>
+      </div>
     </form>
   </div>
+
+  <style>
+    /* Additional styles */
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    
+    .form-row > div {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    label {
+      margin-bottom: 5px;
+      color: #555;
+    }
+    
+    .instruction-text {
+      color: #666;
+      margin-bottom: 15px;
+      font-style: italic;
+    }
+    
+    .low-stock {
+      background-color: #fff8e1;
+    }
+    
+    .stock-warning {
+      color: #f57c00;
+      margin-left: 5px;
+    }
+    
+    .form-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    
+    .secondary-btn {
+      background-color: #6c757d;
+    }
+    
+    .secondary-btn:hover {
+      background-color: #5a6268;
+    }
+  </style>
 
   <script>
   function togglePaymentTerms() {
     const method = document.getElementById('payment_method').value;
+    const termsContainer = document.getElementById('payment_terms_container');
     const terms = document.getElementById('payment_terms');
+    
     if (method === 'Installment') {
-      terms.style.display = 'block';
+      termsContainer.style.display = 'flex';
       terms.required = true;
     } else {
-      terms.style.display = 'none';
+      termsContainer.style.display = 'none';
       terms.required = false;
       terms.value = '';
     }
@@ -374,41 +452,40 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
 
   // Trigger once on load in case of browser remembering form values
   window.addEventListener('DOMContentLoaded', togglePaymentTerms);
-  
-// Add this script near your existing JavaScript
-document.querySelector('form').addEventListener('submit', function(e) {
+
+  // Form validation
+  document.querySelector('form').addEventListener('submit', function(e) {
     let hasValidQuantity = false;
     const quantityInputs = document.querySelectorAll('input[name^="products["][name$="[quantity]"]');
     
     // Check if at least one product has quantity > 0
     quantityInputs.forEach(input => {
-        if (parseInt(input.value) > 0) {
-            hasValidQuantity = true;
-        }
+      if (parseInt(input.value) > 0) {
+        hasValidQuantity = true;
+      }
     });
     
     if (!hasValidQuantity) {
-        e.preventDefault();
-        alert('Please enter a quantity greater than 0 for at least one product');
-        return false;
+      e.preventDefault();
+      alert('Please enter a quantity greater than 0 for at least one product');
+      return false;
     }
     
     // Additional check for individual products
     let invalidProducts = [];
     quantityInputs.forEach(input => {
-        if (parseInt(input.value) < 0) {
-            invalidProducts.push(input.closest('tr').querySelector('td:first-child').textContent);
-        }
+      if (parseInt(input.value) < 0) {
+        invalidProducts.push(input.closest('tr').querySelector('td:first-child').textContent);
+      }
     });
     
     if (invalidProducts.length > 0) {
-        e.preventDefault();
-        alert('Invalid quantities for:\n' + invalidProducts.join('\n') + '\n\nQuantity cannot be negative');
-        return false;
+      e.preventDefault();
+      alert('Invalid quantities for:\n' + invalidProducts.join('\n') + '\n\nQuantity cannot be negative');
+      return false;
     }
-});
-
-</script>
+  });
+  </script>
 
 </body>
 </html>

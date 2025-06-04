@@ -277,27 +277,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_item_id'])) {
     }
 }
 
-// Fetch orders with remaining quantities
-if ($_SESSION['role'] === 'manager') {
-    $order_sql = "SELECT po.*, u.username, 
-                 (SELECT SUM(poi.quantity - IFNULL(poi.received_qty, 0)) 
-                  FROM purchase_order_items poi 
-                  WHERE poi.order_id = po.order_id) AS remaining_quantity
-                 FROM purchase_orders po 
-                 JOIN users u ON po.user_id = u.user_id 
-                 ORDER BY po.order_date DESC";
-    $order_stmt = $conn->prepare($order_sql);
-} else {
-    $order_sql = "SELECT po.*, 
-                 (SELECT SUM(poi.quantity - IFNULL(poi.received_qty, 0)) 
-                  FROM purchase_order_items poi 
-                  WHERE poi.order_id = po.order_id) AS remaining_quantity
-                 FROM purchase_orders po 
-                 WHERE po.user_id = ? 
-                 ORDER BY po.order_date DESC";
-    $order_stmt = $conn->prepare($order_sql);
-    $order_stmt->bind_param("i", $_SESSION['user_id']);
-}
+// Fetch all orders for both managers and staff
+$order_sql = "SELECT po.*, u.username, 
+             (SELECT SUM(poi.quantity - IFNULL(poi.received_qty, 0)) 
+              FROM purchase_order_items poi 
+              WHERE poi.order_id = po.order_id) AS remaining_quantity
+             FROM purchase_orders po 
+             JOIN users u ON po.user_id = u.user_id 
+             ORDER BY po.order_date DESC";
+$order_stmt = $conn->prepare($order_sql);
 $order_stmt->execute();
 $order_result = $order_stmt->get_result();
 
@@ -318,7 +306,7 @@ while ($order = $order_result->fetch_assoc()) {
         'items' => []
     ];
     
-    // Fetch items for this order - Fix the query to match your database structure
+    // Fetch items for this order
     $items_sql = "SELECT poi.*, p.name as product_name, p.category, p.supplier
                  FROM purchase_order_items poi 
                  LEFT JOIN products p ON poi.product_id = p.product_id 
@@ -333,7 +321,7 @@ while ($order = $order_result->fetch_assoc()) {
     }
 }
 
-// Add this right after the database queries
+// Add debug info if requested
 if (isset($_GET['debug']) && $_SESSION['role'] === 'manager') {
     echo "<pre style='background:#f5f5f5;padding:15px;margin:15px 0;border:1px solid #ddd;'>";
     echo "DEBUG INFO:\n\n";
@@ -433,6 +421,7 @@ if (isset($_GET['debug']) && $_SESSION['role'] === 'manager') {
     <table>
       <thead>
         <tr>
+          <th>ID</th>
           <th>Product</th>
           <th>Category</th>
           <th>Quantity</th>
@@ -443,10 +432,11 @@ if (isset($_GET['debug']) && $_SESSION['role'] === 'manager') {
       <tbody>
         <?php foreach ($order['items'] as $item): ?>
         <tr>
+          <td><?= htmlspecialchars($item['product_id'] ?? '') ?></td>
           <td><?= htmlspecialchars($item['product_name'] ?? '') ?></td>
-          <td><?= htmlspecialchars($item['category'] ?? '') ?></td>
-          <td><?= (int)$item['quantity'] ?></td>
           <td><?= htmlspecialchars($item['supplier'] ?? '') ?></td>
+          <td><?= (int)$item['quantity'] ?></td>
+          <td><?= htmlspecialchars($item['category'] ?? '') ?></td>
           <td>
             <?php 
             // Only show remove button if order is not received and user has permission
@@ -511,21 +501,40 @@ if (isset($_GET['debug']) && $_SESSION['role'] === 'manager') {
       </div>
       
       <!-- Receive Order Button -->
-      <?php if (($order['order_status'] === 'confirmed' || $order['order_status'] === 'short_quantity' || $remaining > 0) 
-                && ($order['order_status'] !== 'received')
-                && ($_SESSION['role'] === 'manager' || $_SESSION['user_id'] == $order['user_id'])): ?>
+      <?php 
+      // Debug info to see what's happening
+      error_log("Order #$order_id - Status: {$order['order_status']}, Remaining: {$order['remaining_quantity']}");
+
+      // PERMISSION RULES:
+      // 1. Manager can receive items for any order with remaining items (except rejected)
+      // 2. Staff can only receive items for confirmed or short_quantity orders they created
+      $can_receive = false;
+      
+      if ($_SESSION['role'] === 'manager') {
+        // Managers can receive any non-rejected order with remaining items
+        $can_receive = isset($order['remaining_quantity']) 
+                      && (int)$order['remaining_quantity'] > 0
+                      && $order['order_status'] !== 'rejected';
+      } else {
+        // Staff can only receive confirmed or short_quantity orders they created
+        $can_receive = isset($order['remaining_quantity']) 
+                      && (int)$order['remaining_quantity'] > 0
+                      && ($_SESSION['user_id'] == $order['user_id'])
+                      && ($order['order_status'] === 'confirmed' || $order['order_status'] === 'short_quantity')
+                      && $order['order_status'] !== 'rejected';
+      }
+      
+      if ($can_receive): 
+      ?>
         <div style="margin-bottom: 15px;">
           <button type="button" class="btn" style="background-color: #17a2b8;" onclick="openReceiveModal(<?= $order_id ?>)">
-            <i class="fas fa-check-circle"></i> 
-            <?= ($order['order_status'] === 'short_quantity' || $remaining > 0) ? 'Receive Remaining Items' : 'Receive Order' ?>
+            <i class="fas fa-check-circle"></i> Receive Items (<?= (int)$order['remaining_quantity'] ?>)
           </button>
           
-          <?php if ($order['order_status'] === 'short_quantity' || $remaining > 0): ?>
-            <span style="margin-left: 10px; color: #856404; font-size: 0.9rem;">
-              <i class="fas fa-info-circle"></i> 
-              <?= $remaining ?> items remaining to be received
-            </span>
-          <?php endif; ?>
+          <span style="margin-left: 10px; color: #856404; font-size: 0.9rem;">
+            <i class="fas fa-info-circle"></i> 
+            <?= (int)$order['remaining_quantity'] ?> items remaining to be received
+          </span>
         </div>
       <?php endif; ?>
       

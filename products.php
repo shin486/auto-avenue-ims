@@ -64,7 +64,29 @@ try {
     $search = "";
     if (isset($_GET['search']) && trim($_GET['search']) !== '') {
         $search = $conn->real_escape_string(trim($_GET['search']));
-        $sql = "SELECT * FROM products WHERE is_active = TRUE AND (name LIKE '%$search%' OR category LIKE '%$search%') ORDER BY name ASC";
+        
+        // Check if search is numeric (likely a product ID)
+        if (is_numeric($search)) {
+            $sql = "SELECT * FROM products WHERE is_active = TRUE AND 
+                    (product_id = '$search' OR name LIKE '%$search%' OR category LIKE '%$search%') 
+                    ORDER BY 
+                    CASE 
+                        WHEN product_id = '$search' THEN 1
+                        WHEN name LIKE '$search%' THEN 2
+                        WHEN category LIKE '$search%' THEN 3
+                        ELSE 4
+                    END, name ASC";
+        } else {
+            $sql = "SELECT * FROM products WHERE is_active = TRUE AND 
+                    (name LIKE '%$search%' OR category LIKE '%$search%' OR supplier LIKE '%$search%') 
+                    ORDER BY 
+                    CASE 
+                        WHEN name LIKE '$search%' THEN 1
+                        WHEN category LIKE '$search%' THEN 2
+                        WHEN supplier LIKE '$search%' THEN 3
+                        ELSE 4
+                    END, name ASC";
+        }
     } else {
         // Fetch all active products
         $sql = "SELECT * FROM products WHERE is_active = TRUE ORDER BY name ASC";
