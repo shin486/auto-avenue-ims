@@ -6,83 +6,136 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-$low_stock_query = "SELECT p.product_id, p.name, p.quantity, p.min_stock_level, p.category, s.supplier_name
-                    FROM products p
-                    LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
-                    WHERE p.quantity < p.min_stock_level";
-$low_stock_result = $conn->query($low_stock_query);
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $_POST['action'] === 'submit') {
-    $user_id = $_SESSION['user_id'];
-    $notes = trim($_POST['notes']) ?? '';
-
-    // 1. Insert into purchase_orders
-    $stmt = $conn->prepare("INSERT INTO purchase_orders (user_id, notes) VALUES (?, ?)");
-    $stmt->bind_param("is", $user_id, $notes);
+function generatePONumber($conn) {
+    $prefix = 'PO-' . date('Ymd') . '-';
+    $stmt = $conn->prepare("SELECT COUNT(*) as count FROM purchase_orders WHERE order_number LIKE ?");
+    $likePrefix = $prefix . '%';
+    $stmt->bind_param("s", $likePrefix);
     $stmt->execute();
-    $order_id = $stmt->insert_id;
+    $result = $stmt->get_result();
+    $count = $result->fetch_assoc()['count'] ?? 0;
+    return $prefix . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
+}
 
-    // 2. Insert low stock ordered items
-    if (!empty($_POST['low_stock_order'])) {
-        foreach ($_POST['low_stock_order'] as $product_id => $quantity) {
-            if ((int)$quantity > 0) {
-                // Fetch product details for saving
-                $prod_stmt = $conn->prepare("SELECT name, category, supplier_id FROM products WHERE product_id = ?");
-                $prod_stmt->bind_param("i", $product_id);
-                $prod_stmt->execute();
-                $prod_result = $prod_stmt->get_result();
-                if ($prod = $prod_result->fetch_assoc()) {
-                    // Get supplier name if available
-                    $supplier_name = '';
-                    if (!empty($prod['supplier_id'])) {
-                        $sup_stmt = $conn->prepare("SELECT supplier_name FROM suppliers WHERE supplier_id = ?");
-                        $sup_stmt->bind_param("i", $prod['supplier_id']);
-                        $sup_stmt->execute();
-                        $sup_result = $sup_stmt->get_result();
-                        if ($sup = $sup_result->fetch_assoc()) {
-                            $supplier_name = $sup['supplier_name'];
-                        }
-                    }
+// Get distinct suppliers (categories) from products table
+$suppliers = $conn->query("SELECT DISTINCT category FROM products WHERE category IS NOT NULL ORDER BY category");
 
-                    $item_stmt = $conn->prepare("INSERT INTO purchase_order_items (order_id, product_name, category, quantity, supplier_name) VALUES (?, ?, ?, ?, ?)");
-                    $item_stmt->bind_param("issis", $order_id, $prod['name'], $prod['category'], $quantity, $supplier_name);
-                    $item_stmt->execute();
+// Handle form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit') {
+    $conn->begin_transaction();
+
+    try {
+        $user_id = $_SESSION['user_id'];
+        $notes = trim($_POST['notes'] ?? '');
+        $supplier_name = trim($_POST['supplier_name'] ?? '');
+        $payment_method = trim($_POST['payment_method'] ?? '');
+        $payment_terms = trim($_POST['payment_terms'] ?? '');
+        $expected_arrival = trim($_POST['expected_arrival'] ?? '');
+
+        if (!$supplier_name || !$payment_method || !$expected_arrival) {
+            throw new Exception("Please fill in all required fields.");
+        }
+
+        // Insert into purchase_orders, storing supplier as category (supplier_name)
+        $order_number = generatePONumber($conn);
+        $stmt = $conn->prepare("INSERT INTO purchase_orders 
+                               (order_number, user_id, category, payment_method, payment_terms, expected_arrival, notes) 
+                               VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sisssss", $order_number, $user_id, $supplier_name, $payment_method, $payment_terms, $expected_arrival, $notes);
+        $stmt->execute();
+        $order_id = $stmt->insert_id;
+
+        // Insert order items
+        if (!empty($_POST['products'])) {
+            foreach ($_POST['products'] as $product) {
+                $product_id = (int)($product['product_id'] ?? 0);
+                $quantity = (int)($product['quantity'] ?? 0);
+
+                if ($product_id > 0 && $quantity > 0) {
+                    // Get product details
+                    $prod_stmt = $conn->prepare("SELECT name, category FROM products WHERE product_id = ?");
+                    $prod_stmt->bind_param("i", $product_id);
+                    $prod_stmt->execute();
+                    $prod_result = $prod_stmt->get_result();
+
+                    if ($prod = $prod_result->fetch_assoc()) {
+                        $item_stmt = $conn->prepare("INSERT INTO purchase_order_items 
+                                                   (order_id, product_id, product_name, category, quantity) 
+                                                   VALUES (?, ?, ?, ?, ?)");
+                        $item_stmt->bind_param("iissi", $order_id, $product_id, $prod['name'], $prod['category'], $quantity);
+                        $item_stmt->execute();
+                        $hasValidItems = false;
+        if (!empty($_POST['products'])) {
+            foreach ($_POST['products'] as $product) {
+                $quantity = (int)($product['quantity'] ?? 0);
+                if ($quantity > 0) {
+                    $hasValidItems = true;
+                    break;
                 }
             }
         }
-    }
+        
+        if (!$hasValidItems) {
+            throw new Exception("Please order at least one item with quantity greater than 0");
+        }
 
-    // 3. Insert new products
-    if (!empty($_POST['new_products'])) {
-        foreach ($_POST['new_products'] as $new_product) {
-            $name = trim($new_product['name']);
-            $category = trim($new_product['category']);
-            $quantity = (int)$new_product['quantity'];
-            $supplier_name = trim($new_product['supplier_name']);
-
-            if ($name && $category && $quantity > 0) {
-                $item_stmt = $conn->prepare("INSERT INTO purchase_order_items (order_id, product_name, category, quantity, supplier_name) VALUES (?, ?, ?, ?, ?)");
-                $item_stmt->bind_param("issis", $order_id, $name, $category, $quantity, $supplier_name);
-                $item_stmt->execute();
+                    }
+                }
             }
         }
-    }
 
-    // Optional: redirect or show confirmation
-    header("Location: purchase_order_summary.php?action=view&success=1");
-    exit();
+        // Log transaction
+        $trans_stmt = $conn->prepare("INSERT INTO transactions 
+    (action_type, reference_id, reference_table, performed_by, timestamp, remarks) 
+    VALUES (?, ?, ?, ?, NOW(), ?)");
+    
+$trans_type = 'order_created';
+$reference_id = $order_id;
+$reference_table = 'purchase_orders';
+$performed_by = $user_id;
+$remarks = json_encode([
+    'order_number' => $order_number,
+    'items_count' => count($_POST['products'] ?? [])
+]);
+
+$trans_stmt->bind_param("sisss", $trans_type, $reference_id, $reference_table, $performed_by, $remarks);
+$trans_stmt->execute();
+
+
+        $conn->commit();
+
+        header("Location: purchase_order_summary.php?order_id=" . $order_id);
+        exit();
+
+    } catch (Exception $e) {
+        $conn->rollback();
+        die("Error processing order: " . $e->getMessage());
+    }
+}
+
+// Get products for selected supplier (category)
+$products = [];
+if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
+    $supplier_name = $_GET['supplier_name'];
+    $products_query = $conn->prepare("SELECT product_id, name, category, quantity, min_stock_level 
+                                     FROM products 
+                                     WHERE category = ?");
+    $products_query->bind_param("s", $supplier_name);
+    $products_query->execute();
+    $products = $products_query->get_result()->fetch_all(MYSQLI_ASSOC);
+} else {
+    $supplier_name = '';
 }
 ?>
-
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>Purchase Order - Auto Avenue IMS</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
   <style>
-    /* Your existing CSS here */
+    /* Your CSS here (same as previous) */
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background: #f4f6f8;
@@ -199,142 +252,161 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $_POST['action'] === 'submit') {
       cursor: pointer;
       font-size: 1.2rem;
     }
+  
+    .supplier-section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    .product-row {
+      display: grid;
+      grid-template-columns: 100px 1fr 1fr 100px 100px 80px;
+      gap: 15px;
+      align-items: center;
+      margin-bottom: 10px;
+      padding: 10px;
+      background: #f9f9f9;
+      border-radius: 5px;
+    }
+    .payment-terms {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1><i class="fas fa-file-invoice-dollar"></i> Purchase Order Form</h1>
+    <h1><i class="fas fa-file-invoice-dollar"></i> Create Purchase Order</h1>
 
     <form method="POST" action="purchase_order.php">
+      <input type="hidden" name="action" value="submit" />
       
-      <!-- New Product Order Section -->
-      <div class="form-section">
-        <h2><i class="fas fa-plus-circle"></i> Order New Products</h2>
-        <div id="new-products-section">
-          <div class="form-row">
-            <input type="text" name="new_products[0][name]" placeholder="Product Name" required>
-            <input type="text" name="new_products[0][category]" placeholder="Category" required>
-            <input type="number" name="new_products[0][quantity]" placeholder="Quantity" min="1" required>
-            <input type="text" name="new_products[0][supplier_name]" placeholder="Supplier Name (optional)">
-          </div>
-        </div>
-        <button type="button" class="btn btn-primary" onclick="addNewProduct()">
-          <i class="fas fa-plus"></i> Add Product
-        </button>
-      </div>
-
-     <!-- Low Stock Items Section -->
-<div class="form-section">
-  <h2><i class="fas fa-exclamation-triangle"></i> Low Stock Items</h2>
-  <?php if ($low_stock_result->num_rows > 0): ?>
-    <table>
-      <thead>
-        <tr>
-          <th>Product Name</th>
-          <th>Current Stock</th>
-          <th>Min Level</th>
-          <th>Category</th>
-          <th>Supplier</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php while ($row = $low_stock_result->fetch_assoc()): ?>
-          <tr>
-            <td><?= htmlspecialchars($row['name']) ?></td>
-            <td><?= $row['quantity'] ?></td>
-            <td><?= $row['min_stock_level'] ?></td>
-            <td><?= htmlspecialchars($row['category']) ?></td>
-            <td><?= htmlspecialchars($row['supplier_name']) ?></td>
-            <td>
-              <button type="button" class="btn btn-primary" onclick="showQtyField(<?= $row['product_id'] ?>)">Order Item</button>
-              <div id="qty-field-<?= $row['product_id'] ?>" style="display:none; margin-top:10px;">
-                <input type="number" 
-                       name="low_stock_order[<?= $row['product_id'] ?>]" 
-                       min="1" 
-                       placeholder="Qty"
-                       value="<?= max(1, $row['min_stock_level'] - $row['quantity']) ?>"
-                       style="margin-top:5px; width:100px;"
-                       disabled>
-                       
-              </div>
-            </td>
-          </tr>
-        <?php endwhile; ?>
-      </tbody>
-    </table>
-  <?php else: ?>
-    <div class="no-items">
-      <p><i class="fas fa-check-circle"></i> No low stock items to order.</p>
-    </div>
-  <?php endif; ?>
-</div>
-
-
-      <!-- Additional Order Notes -->
-      <div class="form-section">
-        <h2><i class="fas fa-edit"></i> Additional Information</h2>
+      <!-- Supplier Selection -->
+      <div class="supplier-section">
+        <h2><i class="fas fa-truck"></i> Supplier Details</h2>
         <div class="form-row">
-          <div style="grid-column: span 4;">
-            <label for="notes">Order Notes / Instructions:</label><br />
-            <textarea id="notes" name="notes" rows="3" placeholder="Add notes or instructions here..."></textarea>
-          </div>
+          <select name="supplier_name" id="supplier-select" required onchange="window.location.href='purchase_order.php?supplier_name='+encodeURIComponent(this.value)">
+            <option value="">-- Select Supplier --</option>
+            <?php while ($row = $suppliers->fetch_assoc()): ?>
+              <option value="<?= htmlspecialchars($row['category']) ?>"
+                <?= ($supplier_name === $row['category']) ? 'selected' : '' ?>>
+                <?= htmlspecialchars($row['category']) ?>
+              </option>
+            <?php endwhile; ?>
+          </select>
+
+          <select name="payment_method" id="payment_method" required onchange="togglePaymentTerms()">
+  <option value="">-- Select Payment Method --</option>
+  <option value="Cash on Delivery">Cash on Delivery</option>
+  <option value="Installment">Installment</option>
+</select>
+
+<input type="text" name="payment_terms" id="payment_terms" placeholder="Payment Terms (e.g., 3 months)" style="display: none;" />
+
+          <input type="date" name="expected_arrival" required />
         </div>
       </div>
 
-      <button type="submit" name="action" value="submit" class="submit-btn">
+      <!-- Products Table -->
+      <?php if (!empty($products)): ?>
+        <h2><i class="fas fa-boxes"></i> Products from Selected Supplier</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Product Name</th>
+              <th>Supplier Name</th>
+              <th>Min Stock</th>
+              <th>Qty in Stock</th>
+              <th>Order Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($products as $product): ?>
+              <tr>
+                <td><?= htmlspecialchars($product['name']) ?></td>
+                <td><?= htmlspecialchars($product['category']) ?></td>
+                <td><?= htmlspecialchars($product['quantity']) ?></td>
+                <td><?= htmlspecialchars($product['min_stock_level']) ?></td>
+                <td>
+                  <input type="number" min="0" name="products[<?= (int)$product['product_id'] ?>][quantity]" value="0" />
+                  <input type="hidden" name="products[<?= (int)$product['product_id'] ?>][product_id]" value="<?= (int)$product['product_id'] ?>" />
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php else: ?>
+        <p class="no-items">Select a supplier to show their products here.</p>
+      <?php endif; ?>
+
+      <div class="form-section">
+        <h2><i class="fas fa-sticky-note"></i> Notes</h2>
+        <textarea name="notes" rows="3" placeholder="Additional notes or instructions"></textarea>
+      </div>
+
+      <button type="submit" class="submit-btn">
         <i class="fas fa-paper-plane"></i> Submit Purchase Order
       </button>
-      <button type="button" class="submit-btn" onclick="window.location.href='dashboard.php'">
-  <i class="fas fa-arrow-left"></i> Go Back to Dashboard
-</button>
 
-<button type="button" class="submit-btn" onclick="window.location.href='purchase_order_summary.php'">
-  <i class="fas fa-arrow-right"></i> View Order
+      <button type="button" onclick="window.location.href='dashboard.php'" class="submit-btn">
+  <i class="fas fa-arrow-left"></i> Back to Dashboard
 </button>
-
     </form>
   </div>
 
-<script>
-  let productCount = 1;
-
-  function addNewProduct() {
-    const section = document.getElementById('new-products-section');
-    const div = document.createElement('div');
-    div.className = 'form-row';
-    div.innerHTML = `
-      <input type="text" name="new_products[${productCount}][name]" placeholder="Product Name" required>
-      <input type="text" name="new_products[${productCount}][category]" placeholder="Category" required>
-      <input type="number" name="new_products[${productCount}][quantity]" placeholder="Quantity" min="1" required>
-      <div style="display: flex; gap: 10px; align-items: center;">
-        <input type="text" name="new_products[${productCount}][supplier_name]" placeholder="Supplier Name (optional)">
-        <button type="button" class="remove-btn" onclick="this.parentElement.parentElement.remove()">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-    `;
-    section.appendChild(div);
-    productCount++;
-  }
-
- function showQtyField(productId) {
-  const qtyDiv = document.getElementById(`qty-field-${productId}`);
-  if (qtyDiv) {
-    qtyDiv.style.display = 'block';
-
-    const input = qtyDiv.querySelector('input[type="number"]');
-    if (input) {
-      input.disabled = false;
+  <script>
+  function togglePaymentTerms() {
+    const method = document.getElementById('payment_method').value;
+    const terms = document.getElementById('payment_terms');
+    if (method === 'Installment') {
+      terms.style.display = 'block';
+      terms.required = true;
+    } else {
+      terms.style.display = 'none';
+      terms.required = false;
+      terms.value = '';
     }
   }
 
-  // Hide the Order Item button itself
-  const btn = qtyDiv.previousElementSibling;
-  if (btn) {
-    btn.style.display = 'none';
-  }
-}
+  // Trigger once on load in case of browser remembering form values
+  window.addEventListener('DOMContentLoaded', togglePaymentTerms);
+  
+// Add this script near your existing JavaScript
+document.querySelector('form').addEventListener('submit', function(e) {
+    let hasValidQuantity = false;
+    const quantityInputs = document.querySelectorAll('input[name^="products["][name$="[quantity]"]');
+    
+    // Check if at least one product has quantity > 0
+    quantityInputs.forEach(input => {
+        if (parseInt(input.value) > 0) {
+            hasValidQuantity = true;
+        }
+    });
+    
+    if (!hasValidQuantity) {
+        e.preventDefault();
+        alert('Please enter a quantity greater than 0 for at least one product');
+        return false;
+    }
+    
+    // Additional check for individual products
+    let invalidProducts = [];
+    quantityInputs.forEach(input => {
+        if (parseInt(input.value) < 0) {
+            invalidProducts.push(input.closest('tr').querySelector('td:first-child').textContent);
+        }
+    });
+    
+    if (invalidProducts.length > 0) {
+        e.preventDefault();
+        alert('Invalid quantities for:\n' + invalidProducts.join('\n') + '\n\nQuantity cannot be negative');
+        return false;
+    }
+});
 
 </script>
 

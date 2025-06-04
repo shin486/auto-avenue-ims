@@ -345,6 +345,8 @@ $recent_sales = $conn->query("SELECT s.sale_id, p.name, s.quantity_sold, p.price
         </button>
       </form>
 
+      
+
     <?php else: ?>
       <p>No low stock items at this time.</p>
 
@@ -362,6 +364,23 @@ $recent_sales = $conn->query("SELECT s.sale_id, p.name, s.quantity_sold, p.price
         onmouseover="this.style.backgroundColor='var(--primary-light)';" 
         onmouseout="this.style.backgroundColor='var(--primary)';">
           Generate Purchase Order
+        </button>
+      </form>
+
+      <form action="purchase_order_summary.php" method="get" style="margin-top: 15px;">
+        <button type="submit" style="
+          background-color: var(--primary);
+          color: white;
+          border: none;
+          padding: 10px 18px;
+          border-radius: 6px;
+          font-size: 1rem;
+          cursor: pointer;
+          transition: background-color 0.3s ease;
+        " 
+        onmouseover="this.style.backgroundColor='var(--primary-light)';" 
+        onmouseout="this.style.backgroundColor='var(--primary)';">
+          View Purchase Order
         </button>
       </form>
 
