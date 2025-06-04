@@ -353,6 +353,38 @@ try {
             font-weight: 500;
             transition: background-color 0.3s;
         }
+
+        /* Additional styles for date validation */
+        .date-validation-message {
+            display: block;
+            font-size: 0.8rem;
+            margin-top: 5px;
+            min-height: 1.2rem;
+        }
+        
+        input[type="date"].form-input:invalid {
+            border-color: #f44336;
+        }
+        
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .form-group {
+            position: relative;
+        }
+        
+        /* Ensure consistent form element heights */
+        select.form-select, 
+        input.form-input {
+            height: 38px;
+            padding: 0 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
@@ -398,16 +430,20 @@ try {
                     
                     <div class="form-group">
                         <label for="start_date">Start Date</label>
-                        <input type="date" id="start_date" name="start_date" value="<?= htmlspecialchars($start_date) ?>" class="form-input" onchange="updateDateRange()">
+                        <input type="date" id="start_date" name="start_date" value="<?= htmlspecialchars($start_date) ?>" 
+                               max="<?= date('Y-m-d') ?>" class="form-input" onchange="validateDateRange()">
+                        <small class="date-validation-message"></small>
                     </div>
                     
                     <div class="form-group">
                         <label for="end_date">End Date</label>
-                        <input type="date" id="end_date" name="end_date" value="<?= htmlspecialchars($end_date) ?>" class="form-input" onchange="updateDateRange()">
+                        <input type="date" id="end_date" name="end_date" value="<?= htmlspecialchars($end_date) ?>" 
+                               max="<?= date('Y-m-d') ?>" class="form-input" onchange="validateDateRange()">
+                        <small class="date-validation-message"></small>
                     </div>
                 </div>
                 
-                <button type="submit" class="btn">Generate Report</button>        
+                <button type="submit" class="btn" id="generate-report-btn">Generate Report</button>        
             </form>
         </div>
 
@@ -434,6 +470,69 @@ try {
                 const startDateInput = document.getElementById('start_date');
                 const endDateInput = document.getElementById('end_date');
                 const printButton = document.getElementById('print-report-btn');
+                const generateButton = document.getElementById('generate-report-btn');
+                const form = document.querySelector('form');
+                
+                // Validate date range function
+                function validateDateRange() {
+                    const startDate = new Date(startDateInput.value);
+                    const endDate = new Date(endDateInput.value);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    
+                    // Reset validation messages
+                    document.querySelectorAll('.date-validation-message').forEach(el => {
+                        el.textContent = '';
+                        el.style.color = '';
+                    });
+                    
+                    let isValid = true;
+                    
+                    // Validate start date is not in the future
+                    if (startDate > today) {
+                        startDateInput.nextElementSibling.textContent = 'Start date cannot be in the future';
+                        startDateInput.nextElementSibling.style.color = '#f44336';
+                        isValid = false;
+                    }
+                    
+                    // Validate end date is not in the future (but allow today)
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    if (endDate >= tomorrow) {
+                        endDateInput.nextElementSibling.textContent = 'End date cannot be in the future';
+                        endDateInput.nextElementSibling.style.color = '#f44336';
+                        isValid = false;
+                    }
+                    
+                    // Validate start date is not after end date
+                    if (startDate > endDate) {
+                        startDateInput.nextElementSibling.textContent = 'Start date cannot be after end date';
+                        startDateInput.nextElementSibling.style.color = '#f44336';
+                        endDateInput.nextElementSibling.textContent = 'End date cannot be before start date';
+                        endDateInput.nextElementSibling.style.color = '#f44336';
+                        isValid = false;
+                    }
+                    
+                    // Enable/disable the generate button based on validation
+                    generateButton.disabled = !isValid;
+                    
+                    return isValid;
+                }
+                
+                // Add event listeners for date validation
+                startDateInput.addEventListener('change', validateDateRange);
+                endDateInput.addEventListener('change', validateDateRange);
+                
+                // Validate on form submission
+                form.addEventListener('submit', function(e) {
+                    if (!validateDateRange()) {
+                        e.preventDefault();
+                        alert('Please correct the date range issues before generating the report.');
+                    }
+                });
+                
+                // Initial validation
+                validateDateRange();
                 
                 // Add click event listener to the print button
                 if (printButton) {
@@ -454,7 +553,6 @@ try {
                                 url += 'aaarepinventory_status.php';
                                 break;
                             case 'alerts_log':
-                                // Fix the filename to match exactly what we created
                                 url += 'aaarepalert_log.php';
                                 break;
                             default:
@@ -472,6 +570,12 @@ try {
                     });
                 }
             });
+
+            // Function to update report type (can be expanded if needed)
+            function updateReportType() {
+                // This function can be used to show/hide fields based on report type
+                console.log('Report type changed');
+            }
             </script>
 
             <?php if (isset($error_message)): ?>

@@ -276,6 +276,56 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
       gap: 15px;
       margin-bottom: 20px;
     }
+    /* Form layout and alignment */
+    .form-group {
+      margin-bottom: 15px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .form-group label {
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #555;
+    }
+    
+    .form-group select,
+    .form-group input {
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      width: 100%;
+    }
+    
+    .form-group small {
+      display: block;
+      margin-top: 5px;
+      color: #666;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      align-items: start;
+    }
+    
+    .supplier-section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    
+    /* Ensure consistent heights for inputs */
+    select, input[type="date"], input[type="text"] {
+      box-sizing: border-box;
+      height: 38px !important;
+    }
   </style>
 </head>
 <body>
@@ -289,7 +339,7 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
       <div class="supplier-section">
         <h2><i class="fas fa-truck"></i> Supplier Details</h2>
         <div class="form-row">
-          <div>
+          <div class="form-group">
             <label for="supplier-select"><strong>Supplier:</strong></label>
             <select name="supplier_name" id="supplier-select" required onchange="window.location.href='purchase_order.php?supplier_name='+encodeURIComponent(this.value)">
               <option value="">-- Select Supplier --</option>
@@ -302,7 +352,7 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
             </select>
           </div>
 
-          <div>
+          <div class="form-group">
             <label for="payment_method"><strong>Payment Method:</strong></label>
             <select name="payment_method" id="payment_method" required onchange="togglePaymentTerms()">
               <option value="">-- Select Payment Method --</option>
@@ -311,14 +361,19 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
             </select>
           </div>
 
-          <div id="payment_terms_container" style="display: none;">
+          <div class="form-group" id="payment_terms_container" style="display: none;">
             <label for="payment_terms"><strong>Payment Terms:</strong></label>
             <input type="text" name="payment_terms" id="payment_terms" placeholder="e.g., 3 months" />
           </div>
 
-          <div>
+          <div class="form-group">
             <label for="expected_arrival"><strong>Expected Arrival:</strong></label>
-            <input type="date" name="expected_arrival" id="expected_arrival" required />
+            <input type="date" name="expected_arrival" id="expected_arrival" required 
+                   min="<?= date('Y-m-d') ?>" 
+                   value="<?= date('Y-m-d') ?>" />
+            <small>
+              <i class="fas fa-info-circle"></i> Date must be today or in the future
+            </small>
           </div>
         </div>
       </div>
@@ -397,11 +452,17 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
     .form-row > div {
       display: flex;
       flex-direction: column;
+      margin-bottom: 10px;
     }
     
     label {
-      margin-bottom: 5px;
+      margin-bottom: 8px;
       color: #555;
+    }
+    
+    input[type="date"] {
+      height: 38px;
+      padding: 0 10px;
     }
     
     .instruction-text {
@@ -450,11 +511,49 @@ if (isset($_GET['supplier_name']) && $_GET['supplier_name'] !== '') {
     }
   }
 
+  // Validate expected arrival date
+  function validateExpectedArrival() {
+    const expectedArrival = document.getElementById('expected_arrival');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    const selectedDate = new Date(expectedArrival.value);
+    selectedDate.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    if (selectedDate < today) {
+      expectedArrival.setCustomValidity('Expected arrival date cannot be in the past');
+      return false;
+    } else {
+      expectedArrival.setCustomValidity('');
+      return true;
+    }
+  }
+
   // Trigger once on load in case of browser remembering form values
-  window.addEventListener('DOMContentLoaded', togglePaymentTerms);
+  window.addEventListener('DOMContentLoaded', function() {
+    togglePaymentTerms();
+    
+    // Set current date as default
+    const expectedArrival = document.getElementById('expected_arrival');
+    if (!expectedArrival.value) {
+      const today = new Date();
+      expectedArrival.valueAsDate = today;
+    }
+    
+    // Add validation event listeners
+    expectedArrival.addEventListener('change', validateExpectedArrival);
+    validateExpectedArrival(); // Validate initial value
+  });
 
   // Form validation
   document.querySelector('form').addEventListener('submit', function(e) {
+    // Validate expected arrival date
+    if (!validateExpectedArrival()) {
+      e.preventDefault();
+      alert('Expected arrival date cannot be in the past');
+      return false;
+    }
+    
     let hasValidQuantity = false;
     const quantityInputs = document.querySelectorAll('input[name^="products["][name$="[quantity]"]');
     

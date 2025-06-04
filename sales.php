@@ -95,26 +95,72 @@ $products_result = null;
 $search = "";
 if (isset($_GET['search']) && trim($_GET['search']) !== '') {
     $search = trim($_GET['search']);
-    $sql = "
-        SELECT product_id, name, category, quantity, price, is_active 
-        FROM products
-        WHERE is_active = TRUE AND (name LIKE ? OR category LIKE ?)
-        ORDER BY 
-            CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN category LIKE ? THEN 2
-                ELSE 3
-            END,
-            name ASC
-    ";
-    $search_param = "%$search%";
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        die("Prepare failed: " . $conn->error);
+    
+    // Check if search is numeric (likely a product ID)
+    if (is_numeric($search)) {
+        // Search by exact product ID
+        $sql = "
+            SELECT product_id, name, category, quantity, price, is_active 
+            FROM products
+            WHERE is_active = TRUE AND product_id = ?
+            ORDER BY name ASC
+        ";
+        
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            die("Prepare failed: " . $conn->error);
+        }
+        
+        $search_id = intval($search);
+        $stmt->bind_param("i", $search_id);
+    } else {
+        // Search by exact name or category match
+        $sql = "
+            SELECT product_id, name, category, quantity, price, is_active 
+            FROM products
+            WHERE is_active = TRUE AND (
+                name = ? OR 
+                category = ?
+            )
+            ORDER BY name ASC
+        ";
+        
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            die("Prepare failed: " . $conn->error);
+        }
+        
+        $stmt->bind_param("ss", $search, $search);
     }
-    $stmt->bind_param("ssss", $search_param, $search_param, $search_param, $search_param);
+    
     $stmt->execute();
     $products_result = $stmt->get_result();
+    
+    // If no exact matches found, try partial matches
+    if ($products_result->num_rows === 0) {
+        // Search by partial name or category match
+        $sql = "
+            SELECT product_id, name, category, quantity, price, is_active 
+            FROM products
+            WHERE is_active = TRUE AND (
+                name LIKE ? OR 
+                category LIKE ?
+            )
+            ORDER BY name ASC
+        ";
+        
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            die("Prepare failed: " . $conn->error);
+        }
+        
+        $search_param = "%$search%";
+        
+        $stmt->bind_param("ss", $search_param, $search_param);
+        
+        $stmt->execute();
+        $products_result = $stmt->get_result();
+    }
 } else {
     // Show all active products ordered by name
     $products_result = $conn->query("SELECT product_id, name, category, quantity, price, is_active FROM products WHERE is_active = TRUE ORDER BY name ASC");
@@ -125,6 +171,7 @@ if (isset($_GET['search']) && trim($_GET['search']) !== '') {
 
 // Get the sale_date filter from GET (for filtering sales by date)
 $sale_date_filter = $_GET['sale_date'] ?? '';
+$search = isset($_GET['search']) ? trim($_GET['search']) : '';
 
 // Initialize where clause and parameters for prepared statement
 $where_clause = "";
@@ -146,8 +193,32 @@ if ($sale_date_filter) {
     }
 }
 
+// Add product search filter if provided
+if ($search !== '') {
+    // If we already have a WHERE clause, add AND
+    if ($where_clause) {
+        $where_clause .= " AND ";
+    } else {
+        $where_clause = "WHERE ";
+    }
+    
+    // Check if search is numeric (likely a product ID)
+    if (is_numeric($search)) {
+        $where_clause .= "p.product_id = ?";
+        $params[] = intval($search);
+        $param_types .= "i";
+    } else {
+        // Search by name or category
+        $where_clause .= "(p.name LIKE ? OR p.category LIKE ?)";
+        $search_param = "%$search%";
+        $params[] = $search_param;
+        $params[] = $search_param;
+        $param_types .= "ss";
+    }
+}
+
 // Prepare and execute the query to get sales data
-if ($where_clause) {
+if (!empty($params)) {
     $stmt = $conn->prepare("
         SELECT s.sale_id, p.name, s.quantity_sold, p.price, (s.quantity_sold * p.price) as total, s.sale_date 
         FROM sales s
@@ -452,7 +523,14 @@ button.btn-record:hover, button.btn-record:focus {
                     <label for="product_id">Product</label>
                     <select id="product_id" name="product_id" required>
                         <option value="">Select a product</option>
-                        <?php while ($product = $products_result->fetch_assoc()): ?>
+                        <?php 
+                        // Reset the result pointer to the beginning
+                        if ($products_result) {
+                            $products_result->data_seek(0);
+                        }
+                        
+                        while ($products_result && $product = $products_result->fetch_assoc()): 
+                        ?>
                             <option value="<?= $product['product_id'] ?>">
                                 <?= htmlspecialchars($product['name']) ?>
                                 (₱<?= number_format($product['price'], 2) ?>)
@@ -476,63 +554,124 @@ button.btn-record:hover, button.btn-record:focus {
     
 
 <!-- Date filter form -->
-
 <form method="GET" action="" style="margin-bottom: 20px;">
   <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
     <label for="sale_date" style="min-width: 150px; margin: 0;">Filter sales by date:</label>
-    <input type="date" id="sale_date" name="sale_date" value="<?= htmlspecialchars($sale_date_filter) ?>" style="max-width: 200px; padding: 6px;" />
+    <input type="date" id="sale_date" name="sale_date" 
+           value="<?= htmlspecialchars($sale_date_filter) ?>" 
+           max="<?= date('Y-m-d') ?>"
+           style="max-width: 200px; padding: 6px;" />
     <button type="submit" class="btn">Filter</button>
     <a href="sales.php" class="btn btn-clear">Clear</a>
   </div>
+  <div id="date-validation-message" style="color: #f44336; font-size: 0.8rem; margin-top: 5px; margin-left: 160px;"></div>
 </form>
 
+<!-- Product search form -->
 <form method="GET" action="sales.php" style="margin-bottom: 20px;">
-  <input type="text" name="search" placeholder="Search products by name or category" 
-         value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>" 
-         style="padding: 8px; width: 250px; border-radius: 4px; border: 1px solid #ccc;">
-  <button type="submit" class="add-product-btn" style="padding: 8px 12px; margin-left: 5px;">Search</button>
-  <?php if (!empty($_GET['search'])): ?>
-    <button type="button" onclick="window.location='sales.php'" 
-            style="padding: 8px 12px; margin-left: 5px; background-color: var(--danger);">
-      Clear
-    </button>
-  <?php endif; ?>
+  <div style="display: flex; align-items: center; gap: 10px;">
+    <label for="search" style="min-width: 150px; margin: 0;">Search sales by product:</label>
+    <input type="text" id="search" name="search" placeholder="Enter product ID, name or category" 
+           value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>" 
+           style="padding: 8px; width: 250px; border-radius: 4px; border: 1px solid #ccc;">
+    <button type="submit" class="btn" style="padding: 8px 12px;">Search</button>
+    <?php if (!empty($_GET['search']) || !empty($_GET['sale_date'])): ?>
+      <a href="sales.php" class="btn btn-clear" style="padding: 8px 12px; background-color: var(--danger); color: white;">
+        Clear All Filters
+      </a>
+    <?php endif; ?>
+  </div>
+  <div style="margin-left: 160px; font-size: 0.8rem; color: #666; margin-top: 5px;">
+    Search will filter sales by product ID, name, or category. You can combine with date filter.
+  </div>
 </form>
 
-
-
-
+<!-- Products Table (only shown when searching) -->
+<?php if (isset($_GET['search']) && trim($_GET['search']) !== ''): ?>
+  <h3>Search Results</h3>
+  <?php if ($products_result && $products_result->num_rows > 0): ?>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Product Name</th>
+          <th>Category</th>
+          <th>Stock</th>
+          <th>Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php 
+        // Reset the result pointer to the beginning
+        if ($products_result) {
+            $products_result->data_seek(0);
+        }
+        
+        while ($products_result && $product = $products_result->fetch_assoc()): 
+        ?>
+          <tr>
+            <td><?= $product['product_id'] ?></td>
+            <td><?= htmlspecialchars($product['name']) ?></td>
+            <td><?= htmlspecialchars($product['category']) ?></td>
+            <td><?= $product['quantity'] ?></td>
+            <td>₱<?= number_format($product['price'], 2) ?></td>
+          </tr>
+        <?php endwhile; ?>
+      </tbody>
+    </table>
+  <?php else: ?>
+    <p>No products found matching your search criteria.</p>
+  <?php endif; ?>
+<?php endif; ?>
 
 <!-- Sales Table -->
+<div class="page-header">
+  <h2>Recent Sales <?php if (!empty($search)): ?><small>(Filtered by: <?= htmlspecialchars($search) ?>)</small><?php endif; ?></h2>
+</div>
+
 <table>
-    <thead>
+  <thead>
+    <tr>
+      <th>Sale ID</th>
+      <th>Product Name</th>
+      <th>Quantity Sold</th>
+      <th>Price</th>
+      <th>Total</th>
+      <th>Sale Date & Time</th>
+    </tr>
+  </thead>
+  <tbody>
+    <?php 
+    $grand_total = 0;
+    $total_quantity = 0;
+    
+    if ($sales_result && $sales_result->num_rows > 0): 
+      while($row = $sales_result->fetch_assoc()): 
+        $grand_total += $row['total'];
+        $total_quantity += $row['quantity_sold'];
+    ?>
         <tr>
-            <th>Sale ID</th>
-            <th>Product Name</th>
-            <th>Quantity Sold</th>
-            <th>Price</th>
-            <th>Total</th>
-            <th>Sale Date & Time</th>
+          <td><?= htmlspecialchars($row['sale_id']) ?></td>
+          <td><?= htmlspecialchars($row['name']) ?></td>
+          <td><?= htmlspecialchars($row['quantity_sold']) ?></td>
+          <td>₱<?= number_format($row['price'], 2) ?></td>
+          <td>₱<?= number_format($row['total'], 2) ?></td>
+          <td><?= htmlspecialchars($row['sale_date']) ?></td>
         </tr>
-    </thead>
-    <tbody>
-        <?php if ($sales_result && $sales_result->num_rows > 0): ?>
-            <?php while($row = $sales_result->fetch_assoc()): ?>
-                <tr>
-                    <td><?= htmlspecialchars($row['sale_id']) ?></td>
-                    <td><?= htmlspecialchars($row['name']) ?></td>
-                    <td><?= htmlspecialchars($row['quantity_sold']) ?></td>
-                    <td><?= number_format($row['price'], 2) ?></td>
-                    <td><?= number_format($row['total'], 2) ?></td>
-                    <td><?= htmlspecialchars($row['sale_date']) ?></td>
-                </tr>
-            <?php endwhile; ?>
-        <?php else: ?>
-            <tr>
-                <td colspan="6" style="text-align:center;">No sales found for this date.</td>
-            </tr>
-        <?php endif; ?>
-    </tbody>
+    <?php endwhile; ?>
+        <tr style="font-weight: bold; background-color: #f0f0f0;">
+          <td colspan="2">Grand Total</td>
+          <td><?= $total_quantity ?></td>
+          <td></td>
+          <td>₱<?= number_format($grand_total, 2) ?></td>
+          <td></td>
+        </tr>
+    <?php else: ?>
+      <tr>
+        <td colspan="6" style="text-align:center;">No sales found matching your search criteria.</td>
+      </tr>
+    <?php endif; ?>
+  </tbody>
 </table>
 
 </body>
@@ -541,3 +680,54 @@ button.btn-record:hover, button.btn-record:focus {
 <?php
 $conn->close();
 ?>
+
+<script>
+// Add date validation
+document.addEventListener('DOMContentLoaded', function() {
+    const saleDateInput = document.getElementById('sale_date');
+    const dateValidationMessage = document.getElementById('date-validation-message');
+    const dateFilterForm = document.querySelector('form[action=""]');
+    
+    // Validate sale date function
+    function validateSaleDate() {
+        if (!saleDateInput.value) {
+            return true; // Empty date is valid (no filter)
+        }
+        
+        const saleDate = new Date(saleDateInput.value);
+        const today = new Date();
+        
+        // Reset time parts to compare just the dates
+        saleDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        
+        // Reset validation message
+        dateValidationMessage.textContent = '';
+        
+        // Validate date is not in the future
+        // Using > instead of >= to allow today's date
+        if (saleDate > today) {
+            dateValidationMessage.textContent = 'Date cannot be in the future';
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Add event listener for date validation
+    saleDateInput.addEventListener('change', validateSaleDate);
+    
+    // Validate on form submission
+    dateFilterForm.addEventListener('submit', function(e) {
+        if (!validateSaleDate()) {
+            e.preventDefault();
+            alert('Please select a valid date (not in the future).');
+        }
+    });
+    
+    // Initial validation if date is already set
+    if (saleDateInput.value) {
+        validateSaleDate();
+    }
+});
+</script>
