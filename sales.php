@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/config.php';
+
+// Redirect if user not logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
@@ -9,11 +11,8 @@ if (!isset($_SESSION['user_id'])) {
 $errors = [];
 $success = false;
 
-// Fetch active products for dropdown
-$products_result = $conn->query("SELECT product_id, name, price, quantity FROM products WHERE is_active = TRUE AND quantity > 0 ORDER BY name");
-
 // Handle new sale submission
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['product_id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['product_id'])) {
     $product_id = intval($_POST['product_id']);
     $quantity = intval($_POST['quantity']);
 
@@ -28,53 +27,101 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['product_id'])) {
     if (empty($errors)) {
         // Check product availability
         $product_check = $conn->prepare("SELECT quantity, price FROM products WHERE product_id = ?");
-        $product_check->bind_param("i", $product_id);
-        $product_check->execute();
-        $product = $product_check->get_result()->fetch_assoc();
-
-        if ($product && $product['quantity'] >= $quantity) {
-            // Start transaction
-            $conn->begin_transaction();
-
-            try {
-                // Record the sale
-                $insert_sale = $conn->prepare("INSERT INTO sales (product_id, quantity_sold, sale_date) VALUES (?, ?, ?)");
-$insert_sale->bind_param("iis", $product_id, $quantity, $sale_date);
-$insert_sale->execute();
-
-
-                // Update product quantity
-                $update_product = $conn->prepare("UPDATE products SET quantity = quantity - ? WHERE product_id = ?");
-                $update_product->bind_param("ii", $quantity, $product_id);
-                $update_product->execute();
-
-                // Check for low stock
-                $new_quantity = $product['quantity'] - $quantity;
-
-                $min_stock_stmt = $conn->prepare("SELECT min_stock_level FROM products WHERE product_id = ?");
-                $min_stock_stmt->bind_param("i", $product_id);
-                $min_stock_stmt->execute();
-                $min_stock_result = $min_stock_stmt->get_result()->fetch_assoc();
-
-                if ($min_stock_result && $new_quantity <= $min_stock_result['min_stock_level']) {
-                    $message = "Low stock alert for product ID $product_id (Current: $new_quantity)";
-                    $alert_insert = $conn->prepare("INSERT INTO alerts (product_id, message) VALUES (?, ?)");
-                    $alert_insert->bind_param("is", $product_id, $message);
-                    $alert_insert->execute();
-                }
-
-                $conn->commit();
-                $success = true;
-            } catch (Exception $e) {
-                $conn->rollback();
-                $errors[] = "Error processing sale: " . $e->getMessage();
-            }
+        if (!$product_check) {
+            $errors[] = "Database error: " . $conn->error;
         } else {
-            $errors[] = "Insufficient stock available";
+            $product_check->bind_param("i", $product_id);
+            $product_check->execute();
+            $product = $product_check->get_result()->fetch_assoc();
+
+            if ($product && $product['quantity'] >= $quantity) {
+                // Start transaction
+                $conn->begin_transaction();
+
+                try {
+                    $sale_date = date('Y-m-d H:i:s');
+
+                    // Record the sale
+                    $insert_sale = $conn->prepare("INSERT INTO sales (product_id, quantity_sold, sale_date) VALUES (?, ?, ?)");
+                    if (!$insert_sale) {
+                        throw new Exception("Prepare failed: " . $conn->error);
+                    }
+                    $insert_sale->bind_param("iis", $product_id, $quantity, $sale_date);
+                    $insert_sale->execute();
+
+                    // Update product quantity
+                    $update_product = $conn->prepare("UPDATE products SET quantity = quantity - ? WHERE product_id = ?");
+                    if (!$update_product) {
+                        throw new Exception("Prepare failed: " . $conn->error);
+                    }
+                    $update_product->bind_param("ii", $quantity, $product_id);
+                    $update_product->execute();
+
+                    // Check for low stock
+                    $new_quantity = $product['quantity'] - $quantity;
+                    $min_stock_stmt = $conn->prepare("SELECT min_stock_level FROM products WHERE product_id = ?");
+                    if (!$min_stock_stmt) {
+                        throw new Exception("Prepare failed: " . $conn->error);
+                    }
+                    $min_stock_stmt->bind_param("i", $product_id);
+                    $min_stock_stmt->execute();
+                    $min_stock_result = $min_stock_stmt->get_result()->fetch_assoc();
+
+                    if ($min_stock_result && $new_quantity <= $min_stock_result['min_stock_level']) {
+                        $message = "Low stock alert for product ID $product_id (Current: $new_quantity)";
+                        $alert_insert = $conn->prepare("INSERT INTO alerts (product_id, message) VALUES (?, ?)");
+                        if (!$alert_insert) {
+                            throw new Exception("Prepare failed: " . $conn->error);
+                        }
+                        $alert_insert->bind_param("is", $product_id, $message);
+                        $alert_insert->execute();
+                    }
+
+                    $conn->commit();
+                    $success = true;
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    $errors[] = "Error processing sale: " . $e->getMessage();
+                }
+            } else {
+                $errors[] = "Insufficient stock available";
+            }
         }
     }
 }
 
+// Handle product search with strict filtering (show only matched products)
+$products_result = null;
+$search = "";
+if (isset($_GET['search']) && trim($_GET['search']) !== '') {
+    $search = trim($_GET['search']);
+    $sql = "
+        SELECT product_id, name, category, quantity, price, is_active 
+        FROM products
+        WHERE is_active = TRUE AND (name LIKE ? OR category LIKE ?)
+        ORDER BY 
+            CASE 
+                WHEN name LIKE ? THEN 1
+                WHEN category LIKE ? THEN 2
+                ELSE 3
+            END,
+            name ASC
+    ";
+    $search_param = "%$search%";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        die("Prepare failed: " . $conn->error);
+    }
+    $stmt->bind_param("ssss", $search_param, $search_param, $search_param, $search_param);
+    $stmt->execute();
+    $products_result = $stmt->get_result();
+} else {
+    // Show all active products ordered by name
+    $products_result = $conn->query("SELECT product_id, name, category, quantity, price, is_active FROM products WHERE is_active = TRUE ORDER BY name ASC");
+    if (!$products_result) {
+        die("Query failed: " . $conn->error);
+    }
+}
 
 // Get the sale_date filter from GET (for filtering sales by date)
 $sale_date_filter = $_GET['sale_date'] ?? '';
@@ -84,15 +131,18 @@ $where_clause = "";
 $params = [];
 $param_types = "";
 
+// Validate sale date filter
 if ($sale_date_filter) {
-    // Validate and parse date from input (expected format: YYYY-MM-DD)
     $d = DateTime::createFromFormat('Y-m-d', $sale_date_filter);
-    if ($d) {
+    // Ensure exact date match to prevent invalid date
+    if ($d && $d->format('Y-m-d') === $sale_date_filter) {
         $start_date = $d->format('Y-m-d 00:00:00');
         $end_date = $d->format('Y-m-d 23:59:59');
         $where_clause = "WHERE s.sale_date BETWEEN ? AND ?";
         $params = [$start_date, $end_date];
         $param_types = "ss";
+    } else {
+        $errors[] = "Invalid date format for sale_date filter.";
     }
 }
 
@@ -106,11 +156,13 @@ if ($where_clause) {
         ORDER BY s.sale_date DESC
         LIMIT 50
     ");
+    if (!$stmt) {
+        die("Prepare failed: " . $conn->error);
+    }
     $stmt->bind_param($param_types, ...$params);
     $stmt->execute();
     $sales_result = $stmt->get_result();
 } else {
-    // No filter, get all recent sales
     $sales_result = $conn->query("
         SELECT s.sale_id, p.name, s.quantity_sold, p.price, (s.quantity_sold * p.price) as total, s.sale_date 
         FROM sales s
@@ -118,13 +170,13 @@ if ($where_clause) {
         ORDER BY s.sale_date DESC
         LIMIT 50
     ");
+    if (!$sales_result) {
+        die("Query failed: " . $conn->error);
+    }
 }
 
-
-
-
-
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -310,7 +362,7 @@ if ($where_clause) {
   /* Make <button> and <a> behave the same visually */
   button.btn {
   border: none;
-  background-color: #16bd16;        /* bright green */
+  background-color:rgba(22, 155, 22, 0.79);        /* bright green */
   color: white;                     /* white text */
   padding: 10px 20px;               /* comfortable padding */
   font-size: 16px;
@@ -329,7 +381,7 @@ button.btn:hover, button.btn:focus {
 
 button.btn-record {
   border: 1px solid #ccc;
-  background-color: rgb(22, 189, 22); /* same green as .btn */
+  background-color: rgb(18, 173, 18); /* same green as .btn */
   color: white;
   padding: 10px 20px;
   font-size: 16px;
@@ -345,6 +397,9 @@ button.btn-record:hover, button.btn-record:focus {
   box-shadow: 0 6px 8px rgba(16, 136, 16, 0.6);
   outline: none;
 }
+
+
+
 
 
 
@@ -430,6 +485,20 @@ button.btn-record:hover, button.btn-record:focus {
     <a href="sales.php" class="btn btn-clear">Clear</a>
   </div>
 </form>
+
+<form method="GET" action="sales.php" style="margin-bottom: 20px;">
+  <input type="text" name="search" placeholder="Search products by name or category" 
+         value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>" 
+         style="padding: 8px; width: 250px; border-radius: 4px; border: 1px solid #ccc;">
+  <button type="submit" class="add-product-btn" style="padding: 8px 12px; margin-left: 5px;">Search</button>
+  <?php if (!empty($_GET['search'])): ?>
+    <button type="button" onclick="window.location='sales.php'" 
+            style="padding: 8px 12px; margin-left: 5px; background-color: var(--danger);">
+      Clear
+    </button>
+  <?php endif; ?>
+</form>
+
 
 
 

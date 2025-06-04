@@ -310,6 +310,7 @@ $recent_sales = $conn->query("SELECT s.sale_id, p.name, s.quantity_sold, p.price
             <th>Current Stock</th>
             <th>Minimum Level</th>
             <th>Category</th>
+            <th>Supplier</th>
           </tr>
         </thead>
         <tbody>
@@ -319,7 +320,9 @@ $recent_sales = $conn->query("SELECT s.sale_id, p.name, s.quantity_sold, p.price
               <td><?= htmlspecialchars($row['name']) ?></td>
               <td class="low-stock-item"><?= $row['quantity'] ?></td>
               <td><?= $row['min_stock_level'] ?></td>
+              <td><?= htmlspecialchars($row['supplier']) ?></td>
               <td><?= htmlspecialchars($row['category']) ?></td>
+              
             </tr>
           <?php endwhile; ?>
         </tbody>

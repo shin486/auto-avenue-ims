@@ -340,6 +340,19 @@ try {
                 overflow-x: auto;
             }
         }
+
+          .btn-print {
+            background-color: var(--primary);
+            margin-left: 1000px;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: background-color 0.3s;
+        }
     </style>
 </head>
 <body>
@@ -369,7 +382,7 @@ try {
     <main class="main-content">
         <div class="report-controls">
             <div class="page-header">
-                <h2>Generate Report</h2>
+                <h2>Generate Report</h2> 
             </div>
 
             <form method="POST">
@@ -395,7 +408,7 @@ try {
                     </div>
                 </div>
                 
-                <button type="submit" class="btn">Generate Report</button>
+                <button type="submit" class="btn">Generate Report</button>        
             </form>
         </div>
 
@@ -407,9 +420,14 @@ try {
                         'inventory_status' => 'Inventory Status Report',
                         'alerts_log' => 'Alerts Log Report',
                         default => 'Report Results'
-                    } ?>
-                    <small>(<?= date('M j, Y', strtotime($start_date)) ?> to <?= date('M j, Y', strtotime($end_date)) ?>)</small>
+                        
+                    } ?> 
+
+                    <small>(<?= date('M j, Y', strtotime($start_date)) ?> to <?= date('M j, Y', strtotime($end_date))  ?> )<button type="submit" class="btn-print">Print Report</button> </small> 
+                    
                 </h2>
+
+                 
             </div>
 
             <?php if (isset($error_message)): ?>
